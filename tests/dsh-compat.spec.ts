@@ -304,6 +304,96 @@ suite('DSH 运行时兼容：工具登记表', () => {
     }
   })
 
+  it('全局子代理模型经真实 apply 进入 startActivation 的 agentOptions 并走路由预检', async () => {
+    const runtime = await boot()
+    const directory = await mkdtemp(join(tmpdir(), 'ob-agent-real-model-'))
+    const previous = process.env.DSH_OB_AGENT_POLICY_DIR
+    process.env.DSH_OB_AGENT_POLICY_DIR = directory
+    const module = await loadDsh('@deepseek-ai/dsh-tool-subagent')
+    const apply = module.apply as (ctx: unknown, config: unknown, session?: unknown) => Promise<void>
+    const starts: Record<string, unknown>[] = []
+    const preflights: Record<string, unknown>[] = []
+    // 每个 provider 必须是**同一个对象**：真实 apply 在路由预检后按身份复核 provider 未变化。
+    const providers = new Map<string, Record<string, unknown>>()
+    const providerOf = (name: string): Record<string, unknown> => {
+      const existing = providers.get(name)
+      if (existing !== undefined) return existing
+      const created = { name, inheritsParentContext: false, capabilities: { depthLimit: true, agentOptions: true }, prepareContinuable: () => Promise.resolve({}) }
+      providers.set(name, created)
+      return created
+    }
+    const subagents = {
+      getProvider: providerOf,
+      resolveMaxDepth: (n: number) => n,
+      startActivation: async (spec: Record<string, unknown>) => {
+        starts.push(spec)
+        return {
+          childId: 'obagent-00000000-0000-4000-8000-000000000003',
+          result: Promise.resolve({ output: [{ type: 'text', text: '真实装配结果' }], stopReason: 'completed' }),
+          dispose: async () => undefined,
+        }
+      },
+    }
+    const llm = {
+      resolveCallConfig: async (options: Record<string, unknown>) => {
+        preflights.push(options)
+        return options
+      },
+    }
+    const parent = {
+      id: 'parent-model', options: {},
+      session: { id: 'parent-model', header: { id: 'parent-model' }, requestHeader: () => undefined },
+    }
+    try {
+      // 用户只在全局设置里选了模型；条目本身没有钉死路由。
+      const section = readSection({
+        ...DEFAULT_SECTION,
+        subagentModel: { provider: 'probe-provider', model: 'probe-model', reasoningEffort: 'high' },
+      })
+      const general = section.entries.find(entry => entry.id === 'general')!
+      const result = planSubagent(general, 'continuable', section, { visibleTool: () => true })
+      if (!result.ok || result.plan.kind !== 'subagent') throw new Error('plan failed')
+      await new Promise<void>((resolve, reject) => {
+        ;(runtime.scopeCtx as unknown as HostContext).inject(['tools', 'systemPrompt'], nativeCtx => {
+          const shim = new Proxy(nativeCtx, {
+            get(target, prop) {
+              if (prop === 'subagents') return subagents
+              if (prop === 'llm') return llm
+              if (prop === 'sessionProjections') return { register: () => () => undefined }
+              if (prop === 'get') {
+                return (name: string) => name === 'subagents'
+                  ? subagents
+                  : name === 'llm'
+                    ? llm
+                    : name === 'sessionProjections' ? { register: () => () => undefined } : target.get(name)
+              }
+              return Reflect.get(target, prop, target)
+            },
+          })
+          void apply(subagentContext(shim, result.plan), result.plan.config, parent.session).then(resolve, reject)
+        })
+      })
+      const tool = runtime.scopeCtx.tools.get(result.plan.toolName, runtime.agentKey) as unknown as ToolDefinitionLike
+      expect(tool).toBeDefined()
+      const value = await tool.execute(
+        { description: '全局模型', prompt: '无需调用模型' },
+        { agent: parent as unknown as AgentLike, signal: new AbortController().signal },
+      )
+      expect((value as { kind: string }).kind).toBe('activation')
+      // 真实宿主在创建子代理前用 llm 预检路由：全局模型必须真的进入这一步。
+      expect(preflights).toEqual([{ provider: 'probe-provider', model: 'probe-model', reasoningEffort: 'high' }])
+      // 子代理请求必须带上全局模型（而不是继承父会话）。
+      expect(starts).toHaveLength(1)
+      const request = starts[0]?.request as { agentOptions?: Record<string, unknown> }
+      expect(request.agentOptions).toEqual({ provider: 'probe-provider', model: 'probe-model', reasoningEffort: 'high' })
+    } finally {
+      if (previous === undefined) delete process.env.DSH_OB_AGENT_POLICY_DIR
+      else process.env.DSH_OB_AGENT_POLICY_DIR = previous
+      await runtime.dispose()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('真实作用域中身份覆盖、只读隐藏与自有层/新增工具拒绝同时成立', async () => {
     const runtime = await boot()
     try {

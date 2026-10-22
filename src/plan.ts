@@ -12,6 +12,7 @@ import {
   type ObAgentSection,
   type ObAgentSessionState,
 } from './contract.ts'
+import { effectiveSubagentModel } from './implement.ts'
 import {
   ROSTER_HEADER,
   ROSTER_INSTANCES,
@@ -164,18 +165,30 @@ function modeLabel(modes: readonly EntryMode[]): string {
   return '可继续对话'
 }
 
-/** 一条已启用条目的单行描述（子代理条目含模式、权限、上下文与模型）。 */
-export function describeActiveEntry(item: ActiveEntry): string {
+/**
+ * 一条已启用条目的单行描述（子代理条目含模式、权限、上下文与模型）。
+ * @param item - 已启用条目。
+ * @param section - 当前设置段；用于把「全局子代理模型」展开成实际路由。
+ *   缺省表示没有全局设置（等价于继承主会话），便于只关心条目的调用方。
+ */
+export function describeActiveEntry(
+  item: ActiveEntry,
+  section?: Pick<ObAgentSection, 'subagentModel'>,
+): string {
   const names = item.toolNames.map(name => `\`${name}\``).join('、')
   if (item.entry.kind === 'native') {
     return `- ${item.entry.name}（${names}）：${item.entry.whenPrompt}`
   }
   const permission = item.entry.permission === 'readonly' ? '只读' : '完全权限'
   const context = item.entry.provider === 'fork' ? '继承本会话已完成轮次' : '全新上下文'
-  const model = item.entry.model === undefined
+  const model = effectiveSubagentModel(item.entry, section ?? {})
+  // 三种来源必须可区分：条目钉死（固定角色）、全局默认（用户统一选择）、继承主会话。
+  const modelText = model === undefined
     ? '模型：继承 DSH 主会话'
-    : `模型：${item.entry.model.provider}/${item.entry.model.model}，思考档位：${item.entry.model.reasoningEffort ?? 'DSH 默认'}`
-  return `- ${item.entry.name}（${names}，${modeLabel(item.modes)}，${permission}，${context}，${model}）：${item.entry.whenPrompt}`
+    : item.entry.model !== undefined
+      ? `模型：${model.provider}/${model.model}，思考档位：${model.reasoningEffort ?? 'DSH 默认'}`
+      : `模型：${model.provider}/${model.model}（全局默认），思考档位：${model.reasoningEffort ?? 'DSH 默认'}`
+  return `- ${item.entry.name}（${names}，${modeLabel(item.modes)}，${permission}，${context}，${modelText}）：${item.entry.whenPrompt}`
 }
 
 /**
@@ -209,7 +222,7 @@ export function renderSubagentRoster(
     else if (!effectiveSelection(section, sessionId).enabled) lines.push(ROSTER_NONE_MASTER_OFF)
     else lines.push(ROSTER_NONE_UNSELECTED)
   } else {
-    for (const item of subagents) lines.push(describeActiveEntry(item))
+    for (const item of subagents) lines.push(describeActiveEntry(item, section))
   }
   if (natives.length > 0) {
     const names = natives.flatMap(item => item.toolNames.map(name => `\`${name}\``))
@@ -289,7 +302,7 @@ export function renderSectionText(
   if (active.length === 0) {
     lines.push(`${SECTION_EMPTY} 禁止调用未在本轮启用的 Agent 工具，不要沿用历史工具名；请自行完成任务。`)
   } else {
-    for (const item of active) lines.push(describeActiveEntry(item))
+    for (const item of active) lines.push(describeActiveEntry(item, section))
     lines.push(SECTION_PARALLEL)
     if (active.some(item => item.modes.includes('continuable'))) lines.push(SECTION_CONTINUABLE)
     if (active.some(item => item.entry.impl === 'authoring')) {

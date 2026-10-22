@@ -15,6 +15,7 @@ import {
   type ObAgentAuthoring,
   type ObAgentEntry,
   type ObAgentGate,
+  type ObAgentModel,
   type ObAgentModelGuide,
   type ObAgentSection,
   type ObAgentSessionState,
@@ -63,6 +64,28 @@ export function readModelGuide(value: unknown): ObAgentModelGuide {
   return { inject: raw.inject === 'inline' || raw.inject === 'off' ? raw.inject : DEFAULT_SECTION.modelGuide.inject }
 }
 
+/**
+ * 归一化模型路由（provider + model + 可选思考档位）。
+ *
+ * 只接受对象且 provider/model 都是字符串；`null`、缺字段、非对象一律返回 undefined，
+ * 表示「继承」（条目继承该条目的默认行为，全局设置继承主会话）。空串由校验层拒绝，
+ * 不在这里静默当继承——那会让用户以为已经钉死了路由。
+ * @param value - 待归一化的原始值。
+ * @returns 完整路由，或 undefined 表示未指定。
+ */
+export function readModel(value: unknown): ObAgentModel | undefined {
+  if (value === null || typeof value !== 'object') return undefined
+  const raw = value as Record<string, unknown>
+  if (typeof raw.provider !== 'string' || typeof raw.model !== 'string') return undefined
+  return {
+    provider: raw.provider,
+    model: raw.model,
+    ...(typeof raw.reasoningEffort === 'string' && raw.reasoningEffort !== ''
+      ? { reasoningEffort: raw.reasoningEffort }
+      : {}),
+  }
+}
+
 const IMPLS: readonly NativeImpl[] = ['workflow', 'ralph', 'control', 'list-agents', 'subagent-preset', 'authoring']
 
 /** 归一化单条条目；结构不成立时返回 undefined（调用方告警并跳过）。 */
@@ -77,16 +100,7 @@ export function normalizeEntry(value: unknown): ObAgentEntry | undefined {
   const source = raw.source === 'builtin' || raw.source === 'user' ? raw.source : 'model'
   // 旧 one-shot / 双模式条目只迁移模式，不覆盖用户身份、模型、权限或会话勾选。
   const modes: EntryMode[] = kind === 'subagent' ? ['continuable'] : []
-  const modelRaw = raw.model as Record<string, unknown> | undefined
-  const model = modelRaw !== undefined && typeof modelRaw.provider === 'string' && typeof modelRaw.model === 'string'
-    ? {
-        provider: modelRaw.provider,
-        model: modelRaw.model,
-        ...(typeof modelRaw.reasoningEffort === 'string' && modelRaw.reasoningEffort !== ''
-          ? { reasoningEffort: modelRaw.reasoningEffort }
-          : {}),
-      }
-    : undefined
+  const model = readModel(raw.model)
   const impl = typeof raw.impl === 'string' && (IMPLS as readonly string[]).includes(raw.impl)
     ? raw.impl as NativeImpl
     : undefined
@@ -224,6 +238,7 @@ export function readSection(raw: unknown): ObAgentSection {
   const entries = Array.isArray(value.entries)
     ? (value.entries as unknown[]).map(normalizeEntry).filter((entry): entry is ObAgentEntry => entry !== undefined)
     : [...DEFAULT_SECTION.entries]
+  const subagentModel = readModel(value.subagentModel)
   const section: ObAgentSection = {
     defaultsRevision: readRevision(value.defaultsRevision),
     masterEnabledDefault: readBoolean(value.masterEnabledDefault) ?? DEFAULT_SECTION.masterEnabledDefault,
@@ -237,6 +252,7 @@ export function readSection(raw: unknown): ObAgentSection {
     gate: readGate(value.gate),
     authoring: readAuthoring(value.authoring),
     modelGuide: readModelGuide(value.modelGuide),
+    ...(subagentModel !== undefined ? { subagentModel } : {}),
     entries,
     sessions: readSessions(value.sessions),
   }
@@ -336,6 +352,13 @@ export function validateEntry(
 export function validateSection(section: ObAgentSection): string[] {
   const errors: string[] = []
   if (section.entries.length === 0) errors.push('至少要保留一条 Agent 条目')
+  // 全局模型与条目级模型同一套规则：路由必须成对且非空，半填状态不允许落盘。
+  if (
+    section.subagentModel !== undefined
+    && (section.subagentModel.provider.trim() === '' || section.subagentModel.model.trim() === '')
+  ) {
+    errors.push('全局子代理模型需要同时给出 provider 与 model')
+  }
   if (section.readOnlyTools.length === 0 && section.entries.some(entry => entry.kind === 'subagent' && entry.permission === 'readonly')) {
     errors.push('存在只读条目时，只读工具白名单不能为空')
   }

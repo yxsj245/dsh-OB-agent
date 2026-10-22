@@ -170,6 +170,7 @@ function readPluginConfig(config: PluginConfig): ObAgentSection {
     gate: config.gate.get(),
     authoring: config.authoring.get(),
     modelGuide: config.modelGuide.get(),
+    subagentModel: config.subagentModel.get(),
     entries: config.entries.get(),
     sessions: config.sessions.get(),
   })

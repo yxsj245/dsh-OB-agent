@@ -131,6 +131,15 @@ export interface ObAgentSection {
   readonly gate: ObAgentGate
   readonly authoring: ObAgentAuthoring
   readonly modelGuide: ObAgentModelGuide
+  /**
+   * 全局子代理模型：由本插件装配的子代理在**条目未单独钉死模型**时使用。
+   *
+   * 缺省（`undefined`）= 继承主会话模型（宿主在启动子代理时按会话实际模型解析）。
+   * 优先级固定为「条目钉死 > 全局设置 > 继承主会话」：给某个角色单独选模型仍然有效，
+   * 而全局设置一次覆盖所有「跟随默认」的角色。原生 DSH 工具条目不受此字段影响：
+   * 它们的模型由 DSH 自己的原生设置决定，本插件只是放行/重挂。
+   */
+  readonly subagentModel?: ObAgentModel
   readonly entries: readonly ObAgentEntry[]
   /** 会话 id → 选择；由浏览器经 settingsScope 写入，主机按最近使用裁剪。 */
   readonly sessions: Readonly<Record<string, ObAgentSessionState>>

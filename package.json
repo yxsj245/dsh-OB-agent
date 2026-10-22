@@ -1,7 +1,7 @@
 {
   "name": "dsh-ob-agent",
   "description": "Unified Agent control for DeepSeek Harness: gate every agent-class tool behind one composer switch, preset subagents with per-entry persona/permission/model, and let the model author its own agents.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",

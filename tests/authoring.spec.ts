@@ -531,3 +531,41 @@ describe('工具定义自身', () => {
     })
   })
 })
+
+describe('全局子代理模型对模型自助面的可见性', () => {
+  it('agent_list 单列全局模型，未钉死条目显示「跟随全局」', async () => {
+    const h = harness({
+      subagentModel: { provider: 'gp', model: 'gm' },
+      sessions: { s1: { enabled: true, selected: ['general'] } },
+    })
+    const text = String(await toolOf(h.tools, 'agent_list').execute({}, exec))
+    expect(text).toContain('全局子代理模型：gp / gm（未单独钉死模型的条目使用；条目级模型优先）')
+    expect(text).toContain('模型：跟随全局子代理模型：gp / gm（未指定档位）')
+    // 有全局设置时，未钉死条目不能再显示成「继承主会话」（会误导模型）
+    expect(text).not.toContain('模型：继承主会话')
+  })
+
+  it('条目级钉死模型优先，清单同时说明全局默认', async () => {
+    const entries = DEFAULT_SECTION.entries.map(entry =>
+      entry.id === 'general' ? { ...entry, model: { provider: 'ep', model: 'em' } } : entry)
+    const h = harness({
+      subagentModel: { provider: 'gp', model: 'gm' },
+      entries,
+      sessions: { s1: { enabled: true, selected: ['general'] } },
+    })
+    const text = String(await toolOf(h.tools, 'agent_list').execute({}, exec))
+    const generalLine = text.split('\n').find(line => line.startsWith('- general｜')) ?? ''
+    expect(generalLine).toContain('模型：ep / em（未指定档位）')
+    expect(generalLine).not.toContain('跟随全局子代理模型')
+    // 其它未钉死模型的条目仍应显示「跟随全局」，全局设置本身单列一行
+    expect(text).toContain('模型：跟随全局子代理模型：gp / gm')
+    expect(text).toContain('全局子代理模型：gp / gm')
+  })
+
+  it('没有全局模型时维持原有「继承主会话」文案', async () => {
+    const h = harness({ sessions: { s1: { enabled: true, selected: ['general'] } } })
+    const text = String(await toolOf(h.tools, 'agent_list').execute({}, exec))
+    expect(text).toContain('全局子代理模型：继承主会话')
+    expect(text).toContain('模型：继承主会话')
+  })
+})

@@ -358,4 +358,43 @@ describe('validateSection', () => {
     const section = { ...DEFAULT_SECTION, entries, readOnlyTools: [] }
     expect(validateSection(section)).toContain('存在只读条目时，只读工具白名单不能为空')
   })
+
+  it('全局子代理模型半填（只给 provider 或只给 model）被拒绝', () => {
+    expect(validateSection(readSection({ subagentModel: { provider: 'p', model: '' } })))
+      .toContain('全局子代理模型需要同时给出 provider 与 model')
+    expect(validateSection(readSection({ subagentModel: { provider: '', model: 'm' } })))
+      .toContain('全局子代理模型需要同时给出 provider 与 model')
+  })
+})
+
+describe('全局子代理模型', () => {
+  it('缺省与 null 都表示继承主会话', () => {
+    expect(readSection(undefined).subagentModel).toBeUndefined()
+    expect(readSection({ subagentModel: null }).subagentModel).toBeUndefined()
+    expect(DEFAULT_SECTION.subagentModel).toBeUndefined()
+  })
+
+  it('完整路由与可选思考档位被保留', () => {
+    expect(readSection({ subagentModel: { provider: 'p', model: 'm' } }).subagentModel)
+      .toEqual({ provider: 'p', model: 'm' })
+    expect(readSection({ subagentModel: { provider: 'p', model: 'm', reasoningEffort: 'high' } }).subagentModel)
+      .toEqual({ provider: 'p', model: 'm', reasoningEffort: 'high' })
+  })
+
+  it('形状不合法的值被丢弃（不能靠半个对象蒙混成固定路由）', () => {
+    for (const raw of [{ provider: 'p' }, { model: 'm' }, 'p/m', 42, [], true]) {
+      expect(readSection({ subagentModel: raw }).subagentModel).toBeUndefined()
+    }
+  })
+
+  it('空串档位被当作未指定，不产生空字符串档位', () => {
+    expect(readSection({ subagentModel: { provider: 'p', model: 'm', reasoningEffort: '' } }).subagentModel)
+      .toEqual({ provider: 'p', model: 'm' })
+  })
+
+  it('迁移不改写已保存的全局模型（历史设置段照常读入）', () => {
+    const section = readSection({ defaultsRevision: 0, subagentModel: { provider: 'p', model: 'm' } })
+    expect(section.subagentModel).toEqual({ provider: 'p', model: 'm' })
+    expect(section.defaultsRevision).toBe(DEFAULTS_REVISION)
+  })
 })

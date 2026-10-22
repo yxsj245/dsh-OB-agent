@@ -89,11 +89,32 @@ function selectionOf(section: ObAgentSection, sessionId: string | undefined): Ob
   return effectiveSelection(section, sessionId ?? '')
 }
 
-/** 条目路由的中文描述：钉死的路由，或继承主会话。 */
-function routeLabel(entry: ObAgentEntry): string {
-  if (entry.model === undefined) return '继承主会话'
-  const effort = entry.model.reasoningEffort
-  return `${entry.model.provider} / ${entry.model.model}${effort === undefined ? '（未指定档位）' : `（档位 ${effort}）`}`
+/** 单条路由的中文描述（含是否指定思考档位）。 */
+function routeText(model: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string }): string {
+  const effort = model.reasoningEffort
+  return `${model.provider} / ${model.model}${effort === undefined ? '（未指定档位）' : `（档位 ${effort}）`}`
+}
+
+/**
+ * 条目路由的中文描述：条目钉死的路由 / 跟随全局子代理模型 / 继承主会话。
+ *
+ * 与系统提示段（`describeActiveEntry`）和设置页保持同一优先级：条目 > 全局 > 会话。
+ * @param entry - 子代理条目。
+ * @param section - 当前设置段（读取 `subagentModel`）。
+ */
+function routeLabel(entry: ObAgentEntry, section: ObAgentSection): string {
+  if (entry.model !== undefined) return routeText(entry.model)
+  if (section.subagentModel !== undefined) return `跟随全局子代理模型：${routeText(section.subagentModel)}`
+  return '继承主会话'
+}
+
+/** 全局子代理模型的中文描述（`agent_list` 末尾单列一行用）。 */
+function globalRouteLabel(section: ObAgentSection): string {
+  const model = section.subagentModel
+  if (model === undefined) return '继承主会话（未单独钉死模型的条目沿用本会话模型）'
+  const effort = model.reasoningEffort
+  return `${model.provider} / ${model.model}${effort === undefined ? '' : `（档位 ${effort}）`}`
+    + '（未单独钉死模型的条目使用；条目级模型优先）'
 }
 
 /** 条目权限档的中文描述（与系统提示段 `describeActiveEntry` 保持同一措辞）。 */
@@ -132,9 +153,9 @@ function availabilityLabel(
 }
 
 /** 条目的模型 / 模式 / 权限 / 上下文摘要（写入回执与 `agent_list` 共用）。 */
-function entrySummary(entry: ObAgentEntry): string {
+function entrySummary(entry: ObAgentEntry, section: ObAgentSection): string {
   if (entry.kind === 'native') return '模型与权限由 DSH 原生工具决定（不适用）'
-  return `模型：${routeLabel(entry)}｜模式：可继续对话｜权限：${permissionLabel(entry.permission)}`
+  return `模型：${routeLabel(entry, section)}｜模式：可继续对话｜权限：${permissionLabel(entry.permission)}`
     + `｜上下文：${contextLabel(entry.provider)}`
 }
 
@@ -523,7 +544,7 @@ export function authoringTools(deps: AuthoringDeps): ToolDefinitionLike[] {
     const lines = [
       `已保存 Agent 条目 ${entry.id}（${entry.name}）。`,
       `它将提供的工具：${toolNames.map(name => `\`${name}\``).join('、')}。`,
-      entrySummary(entry),
+      entrySummary(entry, section),
     ]
     const selection = selectionOf(section, sessionId)
     // 与入参 `enableNow` 区分：这里问的是「按当前设置，它此刻是否真的可用」。
@@ -629,7 +650,7 @@ export function authoringTools(deps: AuthoringDeps): ToolDefinitionLike[] {
     name: 'agent_list',
     description:
       '列出当前全部 Agent 条目（含未勾选与模型自建项）：标识、名称、类型、来源、本会话是否真的可用、会暴露的工具名，'
-      + '以及模型路由与思考档位、权限档、上下文来源（spawn/fork）。新建或修改条目之前先用它查重并确认现状。'
+      + '以及模型路由与思考档位（含用户的全局子代理模型设置，条目级模型优先）、权限档、上下文来源（spawn/fork）。新建或修改条目之前先用它查重并确认现状。'
       + '「本会话已启用」是闸门 + 总开关 + 勾选三者共同成立的结果，总开关关闭时不会有任何条目显示为已启用。',
     parameters: parameterSchemaOf({}),
     isConcurrencySafe: () => true,
@@ -646,9 +667,10 @@ export function authoringTools(deps: AuthoringDeps): ToolDefinitionLike[] {
           `- ${entry.id}｜${entry.name}｜${entry.kind === 'native' ? '原生工具' : '子代理'}`
           + `｜${originLabel(entry.source)}${entry.managed ? '' : '（未纳管）'}`
           + `｜${availabilityLabel(section, selection, entry)}｜工具：${names || '（无）'}`
-          + `｜${entrySummary(entry)}｜默认勾选：${entry.defaultEnabled ? '是' : '否'}`,
+          + `｜${entrySummary(entry, section)}｜默认勾选：${entry.defaultEnabled ? '是' : '否'}`,
         )
       }
+      lines.push(`全局子代理模型：${globalRouteLabel(section)}。`)
       lines.push(`总开关默认：${section.masterEnabledDefault ? '开' : '关'}；条目上限：${section.authoring.maxEntries} 条。`)
       if (!section.gate.enabled) {
         lines.push('闸门当前已关闭（逃生舱）：本插件不干预 Agent 工具，条目的启用状态不影响可用性。')

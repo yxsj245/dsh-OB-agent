@@ -1,7 +1,7 @@
 {
   "name": "dsh-ob-agent",
   "description": "Unified Agent control: one composer switch gates every agent-class tool, presets are configurable per entry, and the model can author its own agents",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "entry": {
     "name": "dsh-ob-agent",
     "inject": []

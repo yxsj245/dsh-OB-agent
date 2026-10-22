@@ -18,6 +18,8 @@ export const Config = z.object({
   gate: z.any().default(DEFAULT_SECTION.gate).volatile(),
   authoring: z.any().default(DEFAULT_SECTION.authoring).volatile(),
   modelGuide: z.any().default(DEFAULT_SECTION.modelGuide).volatile(),
+  // 全局子代理模型：`null` / 缺省 = 继承主会话；写入形状为 { provider, model, reasoningEffort? }。
+  subagentModel: z.any().default(null).volatile(),
   entries: z.any().default(DEFAULT_SECTION.entries).volatile(),
   sessions: z.any().default(DEFAULT_SECTION.sessions).volatile(),
 })
@@ -34,6 +36,7 @@ export interface PluginConfig {
   gate: { get(): unknown }
   authoring: { get(): unknown }
   modelGuide: { get(): unknown }
+  subagentModel: { get(): unknown }
   entries: { get(): unknown }
   sessions: { get(): unknown }
 }

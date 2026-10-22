@@ -24,6 +24,7 @@ import {
   ENTRY_LIMITS,
   subagentToolName,
   type ObAgentEntry,
+  type ObAgentModel,
   type ObAgentSection as ObAgentSectionValue,
 } from '../contract.ts'
 import type { ObservableLike } from '../context-types.ts'
@@ -230,13 +231,159 @@ function modelMenuItems(catalog: ModelCatalogResult | undefined, inheritLabel: s
   return items
 }
 
-/** 一条条目的编辑卡片。 */
-function EntryCard(props: {
+/**
+ * 模型路由的展示名（`provider 名 / model 名`）。
+ *
+ * 清单里查不到时退回原始 id：用户手填的路由（清单读取失败时的降级通道）也必须能显示。
+ * @param model - 待展示的路由。
+ * @param catalog - 当前模型清单（可能尚未加载）。
+ * @returns 可直接放进按钮/文案的名称。
+ */
+function modelDisplayName(
+  model: { readonly provider: string; readonly model: string },
+  catalog: ModelCatalogResult | undefined,
+): string {
+  const provider = catalog?.providers.find(item => item.id === model.provider)
+  const modelName = provider?.models.find(item => item.id === model.model)?.name
+  return `${provider?.name ?? model.provider} / ${modelName ?? model.model}`
+}
+
+/** 某条路由可选的思考档位（清单没有登记时为空，不展示档位下拉）。 */
+function effortsOf(
+  model: { readonly provider: string; readonly model: string } | undefined,
+  catalog: ModelCatalogResult | undefined,
+): readonly string[] {
+  if (model === undefined) return []
+  return catalog?.providers.find(item => item.id === model.provider)
+    ?.models.find(item => item.id === model.model)?.efforts ?? []
+}
+
+/**
+ * 全局子代理模型选择器。
+ *
+ * 与条目级模型共用同一份 DSH 模型清单（`remote.session.modelCatalog()`），因此用户
+ * 在 DSH 设置里增删模型后，这里与条目下拉会同步变化；清单读取失败时降级为手填
+ * provider / model，页面不整体不可用。
+ *
+ * 导出仅供离线接线测试直接调用（生产渲染仍由设置页完成）。
+ */
+export function GlobalModelField(props: {
+  model: ObAgentModel | undefined
+  catalog: ModelCatalogResult | undefined
+  disabled: boolean
+  t: ObAgentSectionProps['t']
+  /** 下拉是否展开：状态提升到设置页，避免每次重渲染丢失。 */
+  open: boolean
+  onOpen: (open: boolean) => void
+  onChange: (next: ObAgentModel | undefined) => void
+}): JSX.Element {
+  const { model, catalog, t } = props
+  const selectedId = model === undefined ? '' : `${model.provider}\u0000${model.model}`
+  const label = model === undefined ? t('settings.globalModelInherit') : modelDisplayName(model, catalog)
+  const efforts = effortsOf(model, catalog)
+
+  /** 选中清单里的一项；`''` = 清除全局设置、恢复继承主会话。 */
+  const setModel = (id: string): void => {
+    if (id === '') {
+      props.onChange(undefined)
+      return
+    }
+    const [provider, modelId] = id.split('\u0000')
+    if (provider === undefined || modelId === undefined || provider === '' || modelId === '') return
+    props.onChange({ provider, model: modelId })
+  }
+
+  /** 清单读取失败时的手填通道：两端都填才生效，清空则恢复继承。 */
+  const setModelParts = (provider: string, modelId: string): void => {
+    const nextProvider = provider.trim()
+    const nextModel = modelId.trim()
+    if (nextProvider === '' && nextModel === '') {
+      props.onChange(undefined)
+      return
+    }
+    props.onChange({ provider: nextProvider, model: nextModel })
+  }
+
+  return (
+    <>
+      {catalog !== undefined && catalog.error !== undefined ? (
+        <>
+          <div className="dsh_obAgent_field">
+            <span className="dsh_obAgent_fieldLabel">{t('settings.globalModel')}</span>
+            <span className="dsh_obAgent_fieldDesc">{t('settings.models.failed')}</span>
+          </div>
+          <TextField
+            label={t('settings.entry.modelProvider')}
+            value={model?.provider ?? ''}
+            disabled={props.disabled}
+            onChange={next => { setModelParts(next, model?.model ?? '') }}
+          />
+          <TextField
+            label={t('settings.entry.modelId')}
+            value={model?.model ?? ''}
+            disabled={props.disabled}
+            onChange={next => { setModelParts(model?.provider ?? '', next) }}
+          />
+        </>
+      ) : (
+        <Field
+          label={t('settings.globalModel')}
+          desc={catalog === undefined ? t('settings.models.loading') : t('settings.globalModelDesc')}
+        >
+          <Menu
+            open={props.open}
+            portal
+            side="bottom"
+            align="start"
+            anchor={(
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={props.disabled}
+                onClick={() => { props.onOpen(!props.open) }}
+              >
+                {label}
+              </Button>
+            )}
+            items={modelMenuItems(catalog, t('settings.globalModelInherit'))}
+            selectedId={selectedId}
+            onSelect={(id) => { props.onOpen(false); setModel(id) }}
+            onClose={() => { props.onOpen(false) }}
+          />
+        </Field>
+      )}
+      {model !== undefined && efforts.length > 0 ? (
+        <SelectField
+          label={t('settings.entry.modelEffort')}
+          value={model.reasoningEffort ?? ''}
+          disabled={props.disabled}
+          options={[{ value: '', label: '—' }, ...efforts.map(effort => ({ value: effort, label: effort }))]}
+          onChange={(effort) => {
+            props.onChange({
+              provider: model.provider,
+              model: model.model,
+              ...(effort === '' ? {} : { reasoningEffort: effort }),
+            })
+          }}
+        />
+      ) : null}
+    </>
+  )
+}
+
+/**
+ * 一条条目的编辑卡片。
+ *
+ * 导出仅供离线接线测试直接调用（生产渲染仍由设置页与宿主完成）。
+ */
+export function EntryCard(props: {
   entry: ObAgentEntry
   index: number
   total: number
   t: ObAgentSectionProps['t']
   catalog: ModelCatalogResult | undefined
+  /** 全局子代理模型：条目未钉死模型时跟随它（界面据此显示继承去向）。 */
+  globalModel: ObAgentModel | undefined
   globalReadOnly: readonly string[]
   disabled: boolean
   onEdit: (next: ObAgentEntry) => void
@@ -256,17 +403,17 @@ function EntryCard(props: {
     ? t('settings.entry.origin.model')
     : entry.source === 'builtin' ? t('settings.entry.origin.builtin') : t('settings.entry.origin.user')
   const selectedModel = entry.model === undefined ? '' : `${entry.model.provider}\u0000${entry.model.model}`
-  const providerName = props.catalog?.providers.find(provider => provider.id === entry.model?.provider)?.name
-  const modelName = props.catalog?.providers
-    .find(provider => provider.id === entry.model?.provider)
-    ?.models.find(model => model.id === entry.model?.model)?.name
-  const modelLabel = entry.model === undefined
+  // 「未钉死模型」的去向取决于全局设置：有全局模型时跟随全局，否则继承主会话。
+  const inheritLabel = props.globalModel === undefined
     ? t('settings.entry.modelInherit')
-    : `${providerName ?? entry.model.provider} / ${modelName ?? entry.model.model}`
-  const efforts = entry.model === undefined
-    ? []
-    : props.catalog?.providers.find(provider => provider.id === entry.model?.provider)
-      ?.models.find(model => model.id === entry.model?.model)?.efforts ?? []
+    : t('settings.entry.modelFollowGlobal', { route: modelDisplayName(props.globalModel, props.catalog) })
+  const modelLabel = entry.model === undefined
+    ? inheritLabel
+    : modelDisplayName(entry.model, props.catalog)
+  const efforts = effortsOf(entry.model, props.catalog)
+  const inheritedHint = entry.model === undefined && props.globalModel !== undefined
+    ? t('settings.entry.modelGlobalHint', { route: modelDisplayName(props.globalModel, props.catalog) })
+    : undefined
 
   const dropModel = (): void => {
     const { model: _dropped, ...rest } = entry
@@ -442,7 +589,7 @@ function EntryCard(props: {
                 />
               </>
             ) : (
-              <Field label={t('settings.entry.model')} desc={modelHint(props.catalog, t)}>
+              <Field label={t('settings.entry.model')} desc={modelHint(props.catalog, t) ?? inheritedHint}>
                 <Menu
                   open={props.modelOpen}
                   portal
@@ -458,7 +605,7 @@ function EntryCard(props: {
                       {modelLabel}
                     </Button>
                   )}
-                  items={modelMenuItems(props.catalog, t('settings.entry.modelInherit'))}
+                  items={modelMenuItems(props.catalog, inheritLabel)}
                   selectedId={selectedModel}
                   onSelect={(id) => { props.onModelOpen(false); setModel(id) }}
                   onClose={() => { props.onModelOpen(false) }}
@@ -553,6 +700,8 @@ export function ObAgentSection(props: ObAgentSectionProps): JSX.Element {
   const [gateOpen, setGateOpen] = useState(false)
   /** 当前展开模型下拉的条目标识：按标识记录，卡片重排/删除不会让菜单挂到别的条目上。 */
   const [modelMenuId, setModelMenuId] = useState<string | undefined>(undefined)
+  /** 全局子代理模型下拉的展开状态（与条目下拉分开，两者互不干扰）。 */
+  const [globalModelOpen, setGlobalModelOpen] = useState(false)
   const [status, setStatus] = useState<{ kind: 'idle' | 'saving' | 'saved' | 'error'; message?: string }>({ kind: 'idle' })
   const [errors, setErrors] = useState<readonly string[]>([])
   /** 「恢复出厂」的两步确认状态：第一次点击只进入待确认态。 */
@@ -607,6 +756,9 @@ export function ObAgentSection(props: ObAgentSectionProps): JSX.Element {
       gate: { ...current.gate },
       authoring: { ...current.authoring },
       modelGuide: { ...current.modelGuide },
+      // 清除全局模型必须写 null：config 的「未设置」与「继承主会话」是同一个状态，
+      // 用可序列化的 null 表达，避免 undefined 在配置写入路径上被丢弃。
+      subagentModel: current.subagentModel ?? null,
       entries: current.entries.map(entry => ({ ...entry })),
     })
     if (failure !== undefined) {
@@ -640,6 +792,8 @@ export function ObAgentSection(props: ObAgentSectionProps): JSX.Element {
       gate: { ...DEFAULT_SECTION.gate },
       authoring: { ...DEFAULT_SECTION.authoring },
       modelGuide: { ...DEFAULT_SECTION.modelGuide },
+      // 出厂默认：不钉死全局模型，继承主会话。
+      subagentModel: null,
       entries: DEFAULT_SECTION.entries.map(entry => ({ ...entry })),
     })
     if (failure !== undefined) {
@@ -719,6 +873,15 @@ export function ObAgentSection(props: ObAgentSectionProps): JSX.Element {
             onChange={childReplyToParent => { edit({ childReplyToParent }) }}
           />
           <div className="dsh_obAgent_fields">
+            <GlobalModelField
+              model={current.subagentModel}
+              catalog={catalog}
+              disabled={lockedByTeam}
+              t={t}
+              open={globalModelOpen}
+              onOpen={setGlobalModelOpen}
+              onChange={subagentModel => { edit({ subagentModel }) }}
+            />
             <SelectField
               label={t('settings.guideInject')}
               desc={t('settings.guideInjectDesc')}
@@ -781,6 +944,7 @@ export function ObAgentSection(props: ObAgentSectionProps): JSX.Element {
                 total={current.entries.length}
                 t={t}
                 catalog={catalog}
+                globalModel={current.subagentModel}
                 globalReadOnly={current.readOnlyTools}
                 disabled={lockedByTeam}
                 onEdit={(next) => {

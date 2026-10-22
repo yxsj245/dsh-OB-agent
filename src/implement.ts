@@ -10,6 +10,7 @@ import {
   type EntryMode,
   type NativeImpl,
   type ObAgentEntry,
+  type ObAgentModel,
   type ObAgentSection,
 } from './contract.ts'
 import { UNAVAILABLE_READONLY } from './defaults.ts'
@@ -74,11 +75,27 @@ export function effectiveReadOnly(
   return declared.filter(name => context.visibleTool(name))
 }
 
+/**
+ * 子代理条目实际使用的模型路由。
+ *
+ * 优先级：条目自行钉死的路由 > 全局子代理模型 > 继承主会话（返回 undefined）。
+ * 条目级设置据此保持「固定角色可复现」，全局设置则一次覆盖所有跟随默认的角色。
+ * @param entry - 子代理条目。
+ * @param section - 当前设置段（只读取 `subagentModel`）。
+ * @returns 需要传给子代理的模型路由；undefined 表示继承主会话。
+ */
+export function effectiveSubagentModel(
+  entry: ObAgentEntry,
+  section: Pick<ObAgentSection, 'subagentModel'>,
+): ObAgentModel | undefined {
+  return entry.model ?? section.subagentModel
+}
+
 /** 子代理条目 → 一次装配（一种模式一个工具）。 */
 export function planSubagent(
   entry: ObAgentEntry,
   mode: EntryMode,
-  section: Pick<ObAgentSection, 'readOnlyTools' | 'childReplyToParent'>,
+  section: Pick<ObAgentSection, 'readOnlyTools' | 'childReplyToParent' | 'subagentModel'>,
   context: PlanContext,
 ): PlanResult {
   if (mode !== 'continuable') return { ok: false, reason: 'DSH 已移除新建一次性子代理，仅支持 continuable' }
@@ -89,6 +106,7 @@ export function planSubagent(
     if (allow.length === 0) return { ok: false, reason: UNAVAILABLE_READONLY }
     readOnlyAllow = section.childReplyToParent ? [...new Set([...allow, CHILD_REPLY_TOOL])] : allow
   }
+  const model = effectiveSubagentModel(entry, section)
   return {
     ok: true,
     plan: {
@@ -101,12 +119,12 @@ export function planSubagent(
       config: {
         provider: entry.provider,
         toolName,
-        ...(entry.model !== undefined
+        ...(model !== undefined
           ? {
               agentOptions: {
-                provider: entry.model.provider,
-                model: entry.model.model,
-                ...(entry.model.reasoningEffort !== undefined ? { reasoningEffort: entry.model.reasoningEffort } : {}),
+                provider: model.provider,
+                model: model.model,
+                ...(model.reasoningEffort !== undefined ? { reasoningEffort: model.reasoningEffort } : {}),
               },
             }
           : {}),

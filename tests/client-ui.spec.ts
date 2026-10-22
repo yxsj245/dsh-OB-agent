@@ -225,8 +225,13 @@ function fakeScope(initial: ObAgentWire): ClientSettingsScope<ObAgentWire> {
  * @param teamMode - 设置段里的团队模式取值。
  */
 async function snapshotWith(teamMode: boolean): Promise<ObAgentSnapshot> {
+  return snapshotWithRaw({ teamMode })
+}
+
+/** 同上，但允许直接给任意设置段字段（例如全局子代理模型）。 */
+async function snapshotWithRaw(raw: ObAgentWire): Promise<ObAgentSnapshot> {
   const { createObAgentStore } = await import('../src/client/store.ts')
-  return createObAgentStore(fakeScope({ teamMode }), 's1').getSnapshot()
+  return createObAgentStore(fakeScope(raw), 's1').getSnapshot()
 }
 
 // ── 真实接线回归（唯一审查发现的那个 bug 的守卫） ──────────────────────────────
@@ -286,5 +291,97 @@ describe('设置页真实接线：团队模式下打开 Save 仍可保存', () =
     await vi.waitFor(() => { expect(patched).toHaveLength(1) })
     expect(patched[0]?.teamMode).toBe(true)
     expect(patched[0]?.entries).toBeDefined()
+  })
+})
+
+describe('设置页真实接线：全局子代理模型', () => {
+  /** 渲染设置页并返回元素树；模型清单保持「加载中」，本组只断言接线本身。 */
+  async function renderSection(raw: ObAgentWire): Promise<{ element: unknown; patched: Record<string, unknown>[] }> {
+    const { ObAgentSection } = await import('../src/client/section.tsx')
+    const snapshot = await snapshotWithRaw(raw)
+    const patched: Record<string, unknown>[] = []
+    const element = ObAgentSection({
+      hooks: { obAgent: {} as ObservableLike<ObAgentSnapshot> },
+      patch: async (fields: Record<string, unknown>) => { patched.push(fields); return undefined },
+      loadModels: () => new Promise<never>(() => undefined),
+      useObAgent: selector => selector(snapshot),
+      t: key => String(key),
+    })
+    for (const effect of reactMockBindings.effects) effect()
+    return { element, patched }
+  }
+
+  /** 点击设置页底部的保存按钮并等待一次写入。 */
+  async function savePatched(element: unknown, patched: Record<string, unknown>[]): Promise<void> {
+    const { Button } = await import('@deepseek-ai/dsh-client-ui-primitives')
+    const save = collectByType(element, Button).find(props => props.children === 'settings.save')
+    await (save?.onClick as () => Promise<void>)()
+    await vi.waitFor(() => { expect(patched).toHaveLength(1) })
+  }
+
+  it('保存时写入 subagentModel：未设置写 null，已设置带回完整路由', async () => {
+    const empty = await renderSection({ teamMode: false })
+    await savePatched(empty.element, empty.patched)
+    // 清除/未设置必须显式写 null，否则配置写入路径会丢掉这个字段
+    expect(empty.patched[0]?.subagentModel).toBeNull()
+
+    const globalModel = { provider: 'p', model: 'm', reasoningEffort: 'high' }
+    const picked = await renderSection({ teamMode: false, subagentModel: globalModel })
+    await savePatched(picked.element, picked.patched)
+    expect(picked.patched[0]?.subagentModel).toEqual(globalModel)
+  })
+
+  it('全局模型下拉：未设置选中「继承主会话」，选择回传路由、清空回传 undefined', async () => {
+    const { GlobalModelField } = await import('../src/client/section.tsx')
+    const { Menu } = await import('@deepseek-ai/dsh-client-ui-primitives')
+    const changes: unknown[] = []
+    const element = GlobalModelField({
+      model: undefined,
+      catalog: undefined,
+      disabled: false,
+      t: key => String(key),
+      open: false,
+      onOpen: () => undefined,
+      onChange: next => { changes.push(next) },
+    })
+    const menus = collectByType(element, Menu)
+    expect(menus, '全局模型字段没有渲染下拉').toHaveLength(1)
+    const items = menus[0]?.items as { label?: string }[]
+    expect(items[0]?.label).toBe('settings.globalModelInherit')
+    expect(menus[0]?.selectedId).toBe('')
+
+    const onSelect = menus[0]?.onSelect as (id: string) => void
+    onSelect('gp\u0000gm')
+    onSelect('')
+    expect(changes).toEqual([{ provider: 'gp', model: 'gm' }, undefined])
+  })
+
+  it('条目继承项在有全局模型时改为「跟随全局」，不再显示继承主会话', async () => {
+    const { EntryCard } = await import('../src/client/section.tsx')
+    const { Menu } = await import('@deepseek-ai/dsh-client-ui-primitives')
+    const entry = {
+      id: 'demo', kind: 'subagent', source: 'user', managed: true, defaultEnabled: false,
+      name: '演示', description: '', whenPrompt: '需要时调用', identityPrompt: '你是演示子代理',
+      modes: ['continuable'], provider: 'spawn', permission: 'full',
+    } as const
+    const element = EntryCard({
+      entry: entry as never,
+      index: 0,
+      total: 1,
+      t: key => String(key),
+      catalog: undefined,
+      globalModel: { provider: 'gp', model: 'gm' },
+      globalReadOnly: [],
+      disabled: false,
+      onEdit: () => undefined,
+      onRemove: () => undefined,
+      onDuplicate: () => undefined,
+      onMove: () => undefined,
+      modelOpen: false,
+      onModelOpen: () => undefined,
+    })
+    const menus = collectByType(element, Menu)
+    const items = menus[0]?.items as { label?: string }[]
+    expect(items[0]?.label).toBe('settings.entry.modelFollowGlobal')
   })
 })

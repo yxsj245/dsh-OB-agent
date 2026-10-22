@@ -379,3 +379,34 @@ describe('能力清单只列真的装上了的条目（可用性判定）', () =
     expect(text).not.toContain('`workflow`')
   })
 })
+
+describe('全局子代理模型在系统提示与能力清单里生效', () => {
+  const globalModel = { provider: 'gp', model: 'gm', reasoningEffort: 'low' }
+  const globalSection = (raw: Record<string, unknown> = {}): ObAgentSection =>
+    sectionOf({ subagentModel: globalModel, sessions: { s1: { enabled: true, selected: ['general'] } }, ...raw })
+
+  it('未钉死模型的条目显示全局默认路由与档位', () => {
+    const text = renderSectionText(globalSection(), 's1', 'doc')
+    expect(text).toContain('模型：gp/gm（全局默认）')
+    expect(text).toContain('思考档位：low')
+  })
+
+  it('能力清单同样展开全局默认，避免模型误以为继承了主会话', () => {
+    const roster = renderSubagentRoster(globalSection(), 's1')
+    expect(roster).toContain('模型：gp/gm（全局默认）')
+  })
+
+  it('条目钉死的模型优先，提示里不出现全局路由', () => {
+    const entries = DEFAULT_SECTION.entries.map(entry =>
+      entry.id === 'general' ? { ...entry, model: { provider: 'ep', model: 'em' } } : entry)
+    const section = globalSection({ entries })
+    const text = renderSectionText(section, 's1', 'doc')
+    expect(text).toContain('模型：ep/em')
+    expect(text).not.toContain('gp/gm')
+  })
+
+  it('没有全局模型时保持「继承 DSH 主会话」的旧措辞', () => {
+    const section = sectionOf({ sessions: { s1: { enabled: true, selected: ['general'] } } })
+    expect(renderSectionText(section, 's1', 'doc')).toContain('模型：继承 DSH 主会话')
+  })
+})

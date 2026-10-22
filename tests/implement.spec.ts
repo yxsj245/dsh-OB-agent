@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SECTION, UNAVAILABLE_READONLY } from '../src/defaults.ts'
-import { effectiveReadOnly, planNative, planSubagent, type PlanContext } from '../src/implement.ts'
+import { effectiveReadOnly, effectiveSubagentModel, planNative, planSubagent, type PlanContext } from '../src/implement.ts'
 import { subagentToolName } from '../src/contract.ts'
 import type { ObAgentEntry } from '../src/contract.ts'
 
@@ -154,5 +154,35 @@ describe('planNative', () => {
     expect(planNative(broken, context()).ok).toBe(false)
     const noNames = entryOf({ kind: 'native', impl: 'workflow', toolNames: [] })
     expect(planNative(noNames, context()).ok).toBe(false)
+  })
+})
+
+describe('全局子代理模型', () => {
+  const globalModel = { provider: 'gp', model: 'gm', reasoningEffort: 'low' }
+  const withGlobal = { ...DEFAULT_SECTION, subagentModel: globalModel }
+
+  it('条目未钉死模型时使用全局模型（并带上全局档位）', () => {
+    expect(effectiveSubagentModel(entryOf({}), withGlobal)).toEqual(globalModel)
+    const result = planSubagent(entryOf({}), 'continuable', withGlobal, context())
+    expect(result.ok).toBe(true)
+    if (!result.ok || result.plan.kind !== 'subagent') return
+    expect(result.plan.config.agentOptions).toEqual({ provider: 'gp', model: 'gm', reasoningEffort: 'low' })
+  })
+
+  it('条目钉死的模型优先于全局模型（固定角色可复现）', () => {
+    const entry = entryOf({ model: { provider: 'ep', model: 'em' } })
+    expect(effectiveSubagentModel(entry, withGlobal)).toEqual({ provider: 'ep', model: 'em' })
+    const result = planSubagent(entry, 'continuable', withGlobal, context())
+    expect(result.ok).toBe(true)
+    if (!result.ok || result.plan.kind !== 'subagent') return
+    expect(result.plan.config.agentOptions).toEqual({ provider: 'ep', model: 'em' })
+  })
+
+  it('没有全局模型时保持继承主会话：不写 agentOptions', () => {
+    expect(effectiveSubagentModel(entryOf({}), DEFAULT_SECTION)).toBeUndefined()
+    const result = planSubagent(entryOf({}), 'continuable', DEFAULT_SECTION, context())
+    expect(result.ok).toBe(true)
+    if (!result.ok || result.plan.kind !== 'subagent') return
+    expect(result.plan.config.agentOptions).toBeUndefined()
   })
 })

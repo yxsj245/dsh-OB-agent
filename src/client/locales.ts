@@ -62,6 +62,11 @@ export const zh = {
   'settings.autoControlDesc': '勾选含「可继续对话」的子代理时，自动一并启用 send_message / interrupt_agent，否则它无法续话。',
   'settings.childReply': '子代理可回发消息给父代理',
   'settings.childReplyDesc': '在可继续对话的子代理内部放行 send_message（只放行这一个工具，目标是它的直接父代理），让它能中途补充结论或追问。关闭后子代理只能把结论写在最终回复里。',
+  'settings.globalModel': '全局子代理模型',
+  'settings.globalModelDesc': '本插件装配的子代理默认使用该模型；条目里单独钉死的模型优先。'
+    + '模型清单与 DSH 设置里的模型一致；选择「继承主会话模型」时跟随会话当前模型。'
+    + '只影响本插件装配的子代理，不影响 DSH 原生工具。',
+  'settings.globalModelInherit': '继承主会话模型',
   'settings.readOnlyTools': '只读工具白名单',
   'settings.readOnlyToolsDesc': '逗号分隔。只读条目实际生效的白名单是它与该 agent 真实可见工具的交集；交集为空时该条目停用（不会降级为完全权限）。',
   'settings.promptVariables': '提示词可用变量',
@@ -106,6 +111,8 @@ export const zh = {
   'settings.entry.provider': '子代理后端',
   'settings.entry.model': '模型',
   'settings.entry.modelInherit': '继承主会话模型',
+  'settings.entry.modelFollowGlobal': '跟随全局模型：{route}',
+  'settings.entry.modelGlobalHint': '未单独钉死模型：将使用全局子代理模型 {route}。',
   'settings.entry.modelProvider': 'provider',
   'settings.entry.modelId': 'model',
   'settings.entry.modelEffort': '思考等级（可选）',
@@ -185,6 +192,11 @@ export const en = {
   'settings.autoControlDesc': 'Checking a continuable subagent also enables send_message / interrupt_agent, without which it cannot be continued.',
   'settings.childReply': 'Subagents may message their parent',
   'settings.childReplyDesc': 'Releases send_message inside continuable subagents only (that one tool, targeting their direct parent), so a child can report interim findings or ask a question. One-shot subagents are unaffected. When off, a child can only report in its final reply.',
+  'settings.globalModel': 'Global subagent model',
+  'settings.globalModelDesc': 'Subagents provisioned by this plugin use this model by default; an entry that pins its own model wins. '
+    + 'The list matches the models configured in DSH settings; "Inherit the main session model" follows the session model. '
+    + 'Only affects subagents provisioned by this plugin, not native DSH tools.',
+  'settings.globalModelInherit': 'Inherit the main session model',
   'settings.readOnlyTools': 'Read-only tool allowlist',
   'settings.readOnlyToolsDesc': 'Comma separated. A read-only entry uses the intersection with the tools that agent can actually see; an empty intersection disables the entry (never downgraded to full access).',
   'settings.promptVariables': 'Prompt variables',
@@ -229,6 +241,8 @@ export const en = {
   'settings.entry.provider': 'Subagent provider',
   'settings.entry.model': 'Model',
   'settings.entry.modelInherit': 'Inherit the main session model',
+  'settings.entry.modelFollowGlobal': 'Follow the global model: {route}',
+  'settings.entry.modelGlobalHint': 'No pinned model: the global subagent model {route} is used.',
   'settings.entry.modelProvider': 'provider',
   'settings.entry.modelId': 'model',
   'settings.entry.modelEffort': 'Reasoning effort (optional)',
